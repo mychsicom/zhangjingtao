@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>我的生活记录</title>
+    <style>
+        :root {
+            --bg-color: #f5f7fa;
+            --primary-color: #2196f3;
+        }
+        body { margin: 0; font-family: sans-serif; background: var(--bg-color); display: flex; flex-direction: column; height: 100vh; overscroll-behavior-y: none; }
+        
+        header { background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.05); z-index: 10; padding-top: 10px; flex-shrink: 0;}
+        .tabs { display: flex; justify-content: space-around; border-bottom: 1px solid #eee; }
+        .tab { padding: 12px 10px; font-size: 16px; font-weight: bold; color: #888; cursor: pointer; position: relative; transition: color 0.2s; flex: 1; text-align: center; }
+        .tab.active { color: var(--primary-color); }
+        .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 20%; width: 60%; height: 3px; background: var(--primary-color); border-radius: 3px 3px 0 0; }
+
+        .view-section { display: none; flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; flex-direction: column; }
+        .view-section.active { display: flex; } 
+        #view-todo.active { display: block; padding: 15px; } 
+
+        /* ================= 月视图 ================= */
+        .month-header-nav { display: flex; justify-content: space-between; align-items: center; padding: 15px; background: white; border-bottom: 1px solid #eee; }
+        .month-header-nav button { flex: none; width: 40px; padding: 5px; background: #f0f0f0; color: #333; border: none; border-radius: 4px; font-weight: bold;}
+        .month-header-nav h3 { margin: 0; font-size: 18px; color: #333; }
+        
+        .month-calendar-wrapper { background: #fff; padding-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .month-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 12px; color: #888; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+        .month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: #f5f5f5; border-bottom: 1px solid #f5f5f5;}
+        
+        .month-cell { background: white; aspect-ratio: 1 / 1; display: flex; flex-direction: column; align-items: center; padding-top: 8px; cursor: pointer; position: relative; }
+        .month-cell:active { background: #fafafa; }
+        .month-cell.empty { background: #fdfdfd; cursor: default; }
+        .month-cell-date { font-size: 15px; font-weight: bold; color: #333; width: 28px; height: 28px; display: flex; justify-content: center; align-items: center; border-radius: 50%; }
+        .month-cell.today .month-cell-date { background: var(--primary-color); color: white; }
+        .todo-dot { width: 6px; height: 6px; border-radius: 50%; background-color: #ff5252; margin-top: 4px; box-shadow: 0 1px 3px rgba(255,82,82,0.4); }
+
+        /* ================= 周视图 (核心修复区) ================= */
+        .week-header-nav { display: flex; justify-content: space-between; align-items: center; padding: 10px 15px; background: white; border-bottom: 1px solid #eee; flex-shrink: 0; }
+        .week-header-nav button { flex: none; padding: 6px 12px; background: #f0f0f0; color: #333; font-size: 14px; font-weight: normal; border: none; border-radius: 4px;}
+        .week-title { font-size: 14px; font-weight: bold; color: #333; }
+
+        /* 修复截断 Bug：将容器改为 block 并设置底色，内部使用 flex-wrapper 拉伸高度 */
+        .calendar-container { display: block; flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; background: #fff; }
+        .calendar-flex-wrapper { display: flex; min-height: max-content; }
+        
+        .time-axis { width: 40px; flex-shrink: 0; background: #fff; border-right: 1px solid #ddd; }
+        .time-slot { box-sizing: border-box; border-bottom: 1px solid #eee; text-align: center; font-size: 10px; color: #888; }
+        
+        .days-wrapper { display: flex; flex: 1; width: calc(100% - 40px); }
+        .day-column { flex: 1; border-right: 1px solid #eee; position: relative; background: #fff; }
+        
+        .day-header { height: 40px; display: flex; flex-direction: column; justify-content: center; align-items: center; background: #fafafa; border-bottom: 1px solid #ddd; position: sticky; top: 0; z-index: 5; font-size: 13px; font-weight: bold; line-height: 1.2; color: #333;}
+        .day-grid { position: relative; } /* 高度由内部动态生成的线决定 */
+        .grid-line { box-sizing: border-box; border-bottom: 1px dashed #f0f0f0; }
+
+        .event { position: absolute; box-sizing: border-box; border-radius: 4px; padding: 2px; overflow: hidden; cursor: pointer; transition: all 0.2s; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: pan-y; }
+        .event:active { filter: brightness(0.9); }
+        .event-title { font-weight: bold; font-size: 10px; line-height: 1.2; text-align: center; word-break: break-all; white-space: normal; pointer-events: none; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; }
+        .event-content { display: none; }
+
+        /* ================= 待办列表 ================= */
+        .todo-card { background: white; border-radius: 12px; padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); display: flex; flex-direction: row; align-items: center; justify-content: space-between; cursor: pointer; transition: transform 0.1s; border-left: 5px solid transparent; }
+        .todo-card:active { background: #fafafa; }
+        .todo-content { flex: 1; overflow: hidden; margin-right: 15px; }
+        .todo-card-title { font-size: 16px; font-weight: bold; color: #333; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .todo-card-time { font-size: 13px; color: #666; display: flex; align-items: center; }
+        
+        .todo-checkbox { flex-shrink: 0; width: 24px; height: 24px; border: 2px solid #ccc; border-radius: 4px; display: flex; justify-content: center; align-items: center; transition: all 0.2s; }
+        .todo-checkbox:active { transform: scale(0.8); background-color: #eee; }
+        .todo-checkbox::after { content: '✓'; color: transparent; font-size: 16px; font-weight: bold; transition: color 0.2s; }
+        .todo-checkbox.checking { border-color: #4CAF50; background-color: #4CAF50; }
+        .todo-checkbox.checking::after { color: white; }
+
+        .empty-state { text-align: center; padding: 50px 20px; color: #aaa; font-size: 15px; line-height: 1.5; }
+
+        /* ================= 模态面板 ================= */
+        .fab { position: fixed; bottom: 30px; right: 30px; width: 56px; height: 56px; background: var(--primary-color); color: white; border-radius: 50%; font-size: 30px; line-height: 56px; text-align: center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; z-index: 20; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 30; justify-content: center; align-items: flex-end; }
+        .modal-content { background: white; width: 100%; border-radius: 20px 20px 0 0; padding: 25px 20px; box-sizing: border-box; animation: slideUp 0.3s ease-out; max-height: 90vh; overflow-y: auto; }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 8px; font-size: 14px; color: #555; }
+        .form-group input[type="text"], .form-group input[type="datetime-local"], .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 16px; }
+        .form-group textarea { height: 60px; resize: none; }
+        
+        .color-palette { display: flex; flex-wrap: wrap; gap: 10px; padding: 5px 0; }
+        .color-swatch { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; display: flex; justify-content: center; align-items: center; color: white; font-weight: bold; font-size: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.15); transition: transform 0.1s; }
+        .color-swatch:active { transform: scale(0.9); }
+
+        .btn-group { display: flex; gap: 10px; margin-top: 20px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        .btn-save { background: #4caf50; color: white; }
+        .btn-cancel { background: #f5f5f5; color: #333; }
+        .btn-edit { background: var(--primary-color); color: white; }
+        .btn-delete { background: #ff5252; color: white; margin-top: 15px; width: 100%; display: none; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="tabs">
+            <div class="tab" id="tab-month" onclick="switchView('month')">月视图</div>
+            <div class="tab active" id="tab-week" onclick="switchView('week')">周视图</div>
+            <div class="tab" id="tab-todo" onclick="switchView('todo')">待办列表</div>
+        </div>
+    </header>
+
+    <div id="view-month" class="view-section">
+        <div class="month-calendar-wrapper">
+            <div class="month-header-nav">
+                <button onclick="changeMonth(-1)">&#8592;</button>
+                <h3 id="month-title"></h3>
+                <button onclick="changeMonth(1)">&#8594;</button>
+            </div>
+            <div class="month-weekdays">
+                <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+            </div>
+            <div class="month-grid" id="month-grid-cells"></div>
+        </div>
+    </div>
+
+    <!-- 修复包裹层结构 -->
+    <div id="view-week" class="view-section active">
+        <div class="week-header-nav">
+            <button onclick="changeWeek(-1)">&#8592; 上周</button>
+            <div class="week-title" id="week-title"></div>
+            <button onclick="changeWeek(1)">下周 &#8594;</button>
+        </div>
+        <div class="calendar-container">
+            <div class="calendar-flex-wrapper">
+                <div class="time-axis" id="time-axis"></div>
+                <div class="days-wrapper" id="days-wrapper"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-todo" class="view-section"></div>
+
+    <div class="fab" onclick="openEditModal()">+</div>
+
+    <div class="modal" id="detail-modal" onclick="if(event.target===this) closeDetailModal()">
+        <div class="modal-content" style="padding-bottom: 40px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                <h2 id="detail-title" style="margin: 0; font-size: 22px; color: #333;">标题</h2>
+                <span id="detail-badge" style="padding: 4px 10px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;">类型</span>
+            </div>
+            <div id="detail-time" style="color: #666; font-size: 14px; margin-bottom: 20px; display: flex; align-items: center;"></div>
+            <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; min-height: 60px;">
+                <div id="detail-content" style="font-size: 15px; line-height: 1.6; white-space: pre-wrap; color: #444; margin: 0;"></div>
+            </div>
+            <div class="btn-group" style="margin-top: 30px;">
+                <button class="btn-cancel" onclick="closeDetailModal()">关闭</button>
+                <button class="btn-edit" onclick="editFromDetail()">修改详细信息</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="edit-modal">
+        <div class="modal-content">
+            <input type="hidden" id="event-id">
+            <div class="form-group">
+                <label>类型</label>
+                <select id="event-type">
+                    <option value="TODO">待办计划 (虚线/列表可见)</option>
+                    <option value="DONE">已办记录 (实色/仅周视图可见)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>颜色标签</label>
+                <div class="color-palette" id="color-palette"></div>
+                <input type="hidden" id="event-color" value="#2196F3">
+            </div>
+            <div class="form-group">
+                <label>标题</label>
+                <input type="text" id="event-title" placeholder="例如：跑步、开会">
+            </div>
+            <div class="form-group">
+                <label>内容</label>
+                <textarea id="event-content" placeholder="记录细节..."></textarea>
+            </div>
+            <div class="form-group">
+                <label>开始时间</label>
+                <input type="datetime-local" id="event-start">
+            </div>
+            <div class="form-group">
+                <label>结束时间</label>
+                <input type="datetime-local" id="event-end">
+            </div>
+            <div class="btn-group">
+                <button class="btn-cancel" onclick="closeEditModal()">取消</button>
+                <button class="btn-save" onclick="saveEvent()">保存</button>
+            </div>
+            <button class="btn-delete" id="btn-delete" onclick="deleteEvent()">删除此记录</button>
+        </div>
+    </div>
+
+<script>
+    let events = JSON.parse(localStorage.getItem('my_life_events')) || [];
+    const daysOfWeekShort = ['日', '一', '二', '三', '四', '五', '六'];
+    
+    let currentViewingEvent = null; 
+    let currentTab = 'week'; 
+    let currentMonthBase = new Date(); 
+    let currentWeekBase = new Date();  
+    
+    const PRESET_COLORS = [
+        '#F44336', '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', '#2196F3', '#03A9F4', '#00BCD4',
+        '#009688', '#4CAF50', '#8BC34A', '#CDDC39', '#FFEB3B', '#FFC107', '#FF9800', '#795548'
+    ];
+
+    function switchView(tabName) {
+        currentTab = tabName;
+        document.getElementById('tab-month').className = tabName === 'month' ? 'tab active' : 'tab';
+        document.getElementById('tab-week').className = tabName === 'week' ? 'tab active' : 'tab';
+        document.getElementById('tab-todo').className = tabName === 'todo' ? 'tab active' : 'tab';
+        
+        document.getElementById('view-month').className = tabName === 'month' ? 'view-section active' : 'view-section';
+        document.getElementById('view-week').className = tabName === 'week' ? 'view-section active' : 'view-section';
+        document.getElementById('view-todo').className = tabName === 'todo' ? 'view-section active' : 'view-section';
+        
+        refreshAllViews();
+    }
+
+    function refreshAllViews() {
+        if(currentTab === 'month') renderMonthView();
+        if(currentTab === 'week') renderWeekView();
+        if(currentTab === 'todo') renderTodoList(); 
+    }
+
+    function renderMonthView() {
+        const year = currentMonthBase.getFullYear();
+        const month = currentMonthBase.getMonth();
+        document.getElementById('month-title').innerText = `${year}年${month + 1}月`;
+
+        const firstDay = new Date(year, month, 1).getDay(); 
+        const daysInMonth = new Date(year, month + 1, 0).getDate(); 
+
+        const grid = document.getElementById('month-grid-cells');
+        grid.innerHTML = '';
+
+        const todoDates = new Set();
+        events.forEach(e => {
+            if(e.type === 'TODO') {
+                const d = new Date(e.start);
+                todoDates.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+            }
+        });
+
+        for(let i=0; i<firstDay; i++) {
+            grid.innerHTML += `<div class="month-cell empty"></div>`;
+        }
+
+        const today = new Date();
+        const todayString = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+
+        for(let i=1; i<=daysInMonth; i++) {
+            const dateString = `${year}-${month}-${i}`;
+            const isToday = dateString === todayString;
+            const hasTodo = todoDates.has(dateString);
+            
+            grid.innerHTML += `
+                <div class="month-cell ${isToday ? 'today' : ''}" onclick="jumpToWeekFromMonth(${year}, ${month}, ${i})">
+                    <div class="month-cell-date">${i}</div>
+                    ${hasTodo ? '<div class="todo-dot"></div>' : ''}
+                </div>
+            `;
+        }
+    }
+
+    function changeMonth(delta) {
+        currentMonthBase.setMonth(currentMonthBase.getMonth() + delta);
+        renderMonthView();
+    }
+
+    function jumpToWeekFromMonth(y, m, d) {
+        currentWeekBase = new Date(y, m, d);
+        switchView('week'); 
+    }
+
+    function initTimeAxis() {
+        const timeAxis = document.getElementById('time-axis');
+        timeAxis.innerHTML = '<div class="day-header" style="color:#888;">全天</div>';
+        for(let i=0; i<24; i++) {
+            const slot = document.createElement('div');
+            slot.className = 'time-slot';
+            slot.innerText = `${i}:00`;
+            const h = (i < 8) ? 20 : 50; 
+            slot.style.height = h + 'px';
+            slot.style.lineHeight = h + 'px';
+            timeAxis.appendChild(slot);
+        }
+    }
+
+    // 通过分钟数动态计算坐标点 (完美适配不同行高)
+    function getTopPx(mins) {
+        const sleepMins = Math.min(mins, 8 * 60); 
+        const awakeMins = Math.max(0, mins - 8 * 60); 
+        return (sleepMins * (20 / 60)) + (awakeMins * (50 / 60));
+    }
+
+    function renderWeekView() {
+        const daysWrapper = document.getElementById('days-wrapper');
+        daysWrapper.innerHTML = ''; 
+        
+        const startOfWeek = new Date(currentWeekBase);
+        startOfWeek.setDate(currentWeekBase.getDate() - currentWeekBase.getDay());
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+        
+        document.getElementById('week-title').innerText = `${startOfWeek.getMonth()+1}/${startOfWeek.getDate()} - ${endOfWeek.getMonth()+1}/${endOfWeek.getDate()}`;
+
+        // 生成背景网格虚线
+        let gridHTML = '';
+        for(let j=0; j<24; j++) {
+            const h = (j < 8) ? 20 : 50;
+            gridHTML += `<div class="grid-line" style="height: ${h}px;"></div>`;
+        }
+
+        for(let i=0; i<7; i++) {
+            const currentDay = new Date(startOfWeek);
+            currentDay.setDate(startOfWeek.getDate() + i);
+            const tzoffset = currentDay.getTimezoneOffset() * 60000;
+            const fullDateStr = (new Date(currentDay - tzoffset)).toISOString().split('T')[0];
+
+            const col = document.createElement('div');
+            col.className = 'day-column';
+            col.innerHTML = `
+                <div class="day-header">
+                    <div>${daysOfWeekShort[i]}</div>
+                    <div style="font-size:10px; font-weight:normal; color:#888; margin-top:2px;">${currentDay.getMonth()+1}/${currentDay.getDate()}</div>
+                </div>
+                <div class="day-grid" id="grid-${fullDateStr}">
+                    ${gridHTML}
+                </div>
+            `;
+            daysWrapper.appendChild(col);
+        }
+        
+        document.querySelectorAll('.event').forEach(e => e.remove());
+        const eventsByDate = {};
+        events.forEach(ev => {
+            const dateStr = ev.start.split('T')[0];
+            if(!eventsByDate[dateStr]) eventsByDate[dateStr] = [];
+            eventsByDate[dateStr].push(ev);
+        });
+
+        for (const date in eventsByDate) {
+            const grid = document.getElementById(`grid-${date}`);
+            if(!grid) continue; 
+
+            let dayEvents = eventsByDate[date];
+            dayEvents.sort((a, b) => new Date(a.start) - new Date(b.start));
+
+            let columns = []; 
+            dayEvents.forEach(ev => {
+                const startObj = new Date(ev.start);
+                const endObj = new Date(ev.end);
+                const startMins = startObj.getHours() * 60 + startObj.getMinutes();
+                const endMins = endObj.getHours() * 60 + endObj.getMinutes();
+                
+                let placed = false;
+                for(let i=0; i<columns.length; i++) {
+                    if(startMins >= columns[i][columns[i].length - 1].endMins) {
+                        columns[i].push({ev, startMins, endMins});
+                        placed = true; break;
+                    }
+                }
+                if(!placed) columns.push([{ev, startMins, endMins}]);
+            });
+
+            columns.forEach((col, colIndex) => {
+                col.forEach(item => {
+                    const el = document.createElement('div');
+                    el.className = 'event';
+                    
+                    const topPx = getTopPx(item.startMins);
+                    const heightPx = getTopPx(item.endMins) - topPx;
+                    
+                    el.style.top = topPx + 'px';
+                    el.style.height = Math.max(heightPx, 15) + 'px'; 
+                    
+                    const widthPercent = 100 / columns.length;
+                    el.style.width = widthPercent + '%';
+                    el.style.left = (colIndex * widthPercent) + '%';
+
+                    // 周视图统一使用主题蓝（实色代表已办，虚线透明代表待办）
+                    const unifiedColor = '#2196F3'; 
+                    if (item.ev.type === 'DONE') {
+                        el.style.backgroundColor = unifiedColor;
+                        el.style.color = '#ffffff';
+                        el.style.border = `1px solid ${unifiedColor}`;
+                    } else {
+                        el.style.backgroundColor = unifiedColor + '26'; 
+                        el.style.color = '#333333';
+                        el.style.border = `1px dashed ${unifiedColor}`;
+                    }
+
+                    el.innerHTML = `<div class="event-title">${item.ev.title}</div><div class="event-content"></div>`;
+
+                    let pressTimer; let isLongPress = false; let startY = 0;
+                    el.oncontextmenu = (e) => { e.preventDefault(); return false; };
+                    el.onpointerdown = (e) => {
+                        isLongPress = false; startY = e.clientY;
+                        pressTimer = setTimeout(() => {
+                            isLongPress = true;
+                            if (navigator.vibrate) navigator.vibrate(50);
+                            openEditModal(item.ev); 
+                        }, 500);
+                    };
+                    el.onpointermove = (e) => { if (Math.abs(e.clientY - startY) > 10) clearTimeout(pressTimer); };
+                    el.onpointerup = (e) => {
+                        clearTimeout(pressTimer);
+                        if (!isLongPress && Math.abs(e.clientY - startY) < 10) openDetailModal(item.ev);
+                    };
+                    el.onpointercancel = () => { clearTimeout(pressTimer); };
+
+                    grid.appendChild(el);
+                });
+            });
+        }
+    }
+
+    function changeWeek(delta) {
+        currentWeekBase.setDate(currentWeekBase.getDate() + delta * 7);
+        renderWeekView();
+    }
+
+    function markAsDone(event, id) {
+        event.stopPropagation();
+        const checkboxEl = event.currentTarget;
+        checkboxEl.classList.add('checking');
+
+        setTimeout(() => {
+            const index = events.findIndex(e => e.id === id);
+            if (index > -1) {
+                events[index].type = 'DONE'; 
+                localStorage.setItem('my_life_events', JSON.stringify(events));
+                refreshAllViews(); 
+            }
+        }, 200);
+    }
+
+    function renderTodoList() {
+        const container = document.getElementById('view-todo');
+        container.innerHTML = ''; 
+
+        const todos = events.filter(e => e.type === 'TODO');
+        todos.sort((a, b) => new Date(a.start) - new Date(b.start));
+
+        if (todos.length === 0) {
+            container.innerHTML = `<div class="empty-state">☕️<br><br>太棒了！<br>目前没有任何待办计划。<br>点击右下角 "+" 创建一个新的吧！</div>`;
+            return;
+        }
+
+        todos.forEach(ev => {
+            const start = new Date(ev.start);
+            const end = new Date(ev.end);
+            const dateStr = `${start.getMonth()+1}月${start.getDate()}日`;
+            const timeStr = `${start.getHours().toString().padStart(2,'0')}:${start.getMinutes().toString().padStart(2,'0')} - ${end.getHours().toString().padStart(2,'0')}:${end.getMinutes().toString().padStart(2,'0')}`;
+            
+            const card = document.createElement('div');
+            card.className = 'todo-card';
+            card.style.borderLeftColor = ev.color || '#2196F3'; 
+            
+            card.innerHTML = `
+                <div class="todo-content">
+                    <div class="todo-card-title">${ev.title}</div>
+                    <div class="todo-card-time">🗓️ ${dateStr} &nbsp; 🕒 ${timeStr}</div>
+                </div>
+                <div class="todo-checkbox" onclick="markAsDone(event, '${ev.id}')"></div>
+            `;
+            
+            card.onclick = () => openDetailModal(ev);
+            container.appendChild(card);
+        });
+    }
+
+    function initColorPalette() {
+        const palette = document.getElementById('color-palette');
+        palette.innerHTML = '';
+        PRESET_COLORS.forEach(color => {
+            const swatch = document.createElement('div');
+            swatch.className = 'color-swatch';
+            swatch.style.backgroundColor = color;
+            swatch.dataset.color = color;
+            swatch.onclick = () => selectColor(color);
+            palette.appendChild(swatch);
+        });
+    }
+
+    function selectColor(colorStr) {
+        const targetColor = colorStr.toUpperCase();
+        document.getElementById('event-color').value = targetColor;
+        document.querySelectorAll('.color-swatch').forEach(el => {
+            el.innerHTML = el.dataset.color.toUpperCase() === targetColor ? '✓' : '';
+        });
+    }
+
+    function openDetailModal(ev) {
+        currentViewingEvent = ev;
+        const modal = document.getElementById('detail-modal');
+        
+        document.getElementById('detail-title').innerText = ev.title;
+        document.getElementById('detail-content').innerText = ev.content || '(未填写详细内容)';
+        
+        const start = new Date(ev.start);
+        const end = new Date(ev.end);
+        const formatTime = (date) => `${date.getHours().toString().padStart(2,'0')}:${date.getMinutes().toString().padStart(2,'0')}`;
+        document.getElementById('detail-time').innerHTML = `🕒 ${start.getMonth()+1}月${start.getDate()}日 &nbsp; ${formatTime(start)} - ${formatTime(end)}`;
+
+        const badge = document.getElementById('detail-badge');
+        badge.style.backgroundColor = ev.color || '#2196F3';
+        badge.innerText = ev.type === 'DONE' ? '已办' : '待办计划';
+
+        modal.style.display = 'flex';
+    }
+
+    function closeDetailModal() {
+        document.getElementById('detail-modal').style.display = 'none';
+        currentViewingEvent = null;
+    }
+
+    function editFromDetail() {
+        if(currentViewingEvent) {
+            const evToEdit = currentViewingEvent;
+            closeDetailModal(); 
+            openEditModal(evToEdit); 
+        }
+    }
+
+    const editModal = document.getElementById('edit-modal');
+    
+    function openEditModal(existingEvent = null) {
+        editModal.style.display = 'flex';
+        
+        if (existingEvent) {
+            document.getElementById('event-id').value = existingEvent.id;
+            document.getElementById('event-type').value = existingEvent.type;
+            document.getElementById('event-title').value = existingEvent.title;
+            document.getElementById('event-content').value = existingEvent.content;
+            document.getElementById('event-start').value = existingEvent.start;
+            document.getElementById('event-end').value = existingEvent.end;
+            selectColor(existingEvent.color || '#2196F3');
+            document.getElementById('btn-delete').style.display = 'block';
+        } else {
+            const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+            const localISOTime = (new Date(Date.now() - tzoffset)).toISOString().slice(0, 16);
+            const end = new Date(Date.now() - tzoffset + 3600000); 
+            const endISOTime = end.toISOString().slice(0, 16);
+
+            document.getElementById('event-id').value = '';
+            document.getElementById('event-type').value = (currentTab === 'todo') ? 'TODO' : 'DONE';
+            document.getElementById('event-title').value = '';
+            document.getElementById('event-content').value = '';
+            document.getElementById('event-start').value = localISOTime;
+            document.getElementById('event-end').value = endISOTime;
+            selectColor('#2196F3');
+            document.getElementById('btn-delete').style.display = 'none';
+        }
+    }
+
+    function closeEditModal() {
+        editModal.style.display = 'none';
+    }
+
+    function saveEvent() {
+        const id = document.getElementById('event-id').value || Date.now().toString();
+        const type = document.getElementById('event-type').value;
+        const title = document.getElementById('event-title').value;
+        const content = document.getElementById('event-content').value;
+        const start = document.getElementById('event-start').value;
+        const end = document.getElementById('event-end').value;
+        const color = document.getElementById('event-color').value; 
+
+        if(!title || !start || !end) {
+            alert('请填写标题和时间！');
+            return;
+        }
+        if(new Date(start) >= new Date(end)) {
+            alert('结束时间必须晚于开始时间！');
+            return;
+        }
+
+        const newEvent = { id, type, title, content, start, end, color };
+        const existingIndex = events.findIndex(e => e.id === id);
+        
+        if(existingIndex >= 0) events[existingIndex] = newEvent;
+        else events.push(newEvent);
+
+        localStorage.setItem('my_life_events', JSON.stringify(events));
+        closeEditModal();
+        refreshAllViews(); 
+    }
+
+    function deleteEvent() {
+        if(confirm('确定要删除这条记录吗？')) {
+            const id = document.getElementById('event-id').value;
+            events = events.filter(e => e.id !== id);
+            localStorage.setItem('my_life_events', JSON.stringify(events));
+            closeEditModal();
+            refreshAllViews(); 
+        }
+    }
+
+    initColorPalette();
+    initTimeAxis();
+    refreshAllViews(); 
+
+</script>
+</body>
+</html>
